@@ -1,0 +1,162 @@
+.App {
+  text-align: center;
+  padding: 20px;
+}
+
+.App-logo {
+  height: 40vmin;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .App-logo {
+    animation: App-logo-spin infinite 20s linear;
+  }
+}
+
+.App-header {
+  background-color: #282c34;
+  padding: 20px;
+  color: white;
+  margin-bottom: 20px;
+}
+
+.App-header button {
+  background-color: #61dafb;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 5px;
+  color: #282c34;
+  font-weight: bold;
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+.App-header button:hover {
+  background-color: #4fa8d1;
+}
+
+.App-link {
+  color: #61dafb;
+}
+
+.student-dashboard, .teacher-dashboard {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.qr-scanner {
+  margin: 20px auto;
+  max-width: 500px;
+  padding: 20px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+.attendance-chart {
+  margin: 20px auto;
+  max-width: 800px;
+  padding: 20px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+.success {
+  color: green;
+  font-weight: bold;
+}
+
+.error {
+  color: red;
+  font-weight: bold;
+}
+
+#reader {
+  width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.course-selection {
+  margin: 20px auto;
+  max-width: 400px;
+}
+
+.course-selection select {
+  width: 100%;
+  padding: 10px;
+  border-radius: 5px;
+  border: 1px solid #ddd;
+  font-size: 16px;
+}
+
+.qr-section {
+  margin: 20px auto;
+  max-width: 400px;
+  text-align: center;
+}
+
+.qr-section button {
+  background-color: #61dafb;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 5px;
+  color: #282c34;
+  font-weight: bold;
+  cursor: pointer;
+  margin: 10px 0;
+}
+
+.qr-section button:hover {
+  background-color: #4fa8d1;
+}
+
+.qr-display {
+  margin: 20px 0;
+  padding: 20px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+.qr-display img {
+  max-width: 100%;
+  height: auto;
+}
+
+.student-list {
+  margin: 20px auto;
+  max-width: 800px;
+  overflow-x: auto;
+}
+
+.student-list table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+}
+
+.student-list th,
+.student-list td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid #ddd;
+}
+
+.student-list th {
+  background-color: #f5f5f5;
+  font-weight: bold;
+}
+
+.student-list tr:hover {
+  background-color: #f9f9f9;
+}
+
+@keyframes App-logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

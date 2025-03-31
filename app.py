@@ -1,134 +1,189 @@
 from flask import Flask, request, jsonify
-from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token
 from datetime import datetime, timedelta
 import qrcode
-import face_recognition
+# import face_recognition  # Temporarily commented out
 import numpy as np
 from geopy.distance import geodesic
 import os
 import cv2
 import bcrypt
+from dotenv import load_dotenv
+import firebase_admin
+from firebase_admin import credentials, db
+
+# Load environment variables
+load_dotenv()
+
+# Initialize Firebase Admin
+cred = credentials.Certificate('config/serviceAccountKey.json')
+firebase_admin.initialize_app(cred, {
+    'databaseURL': 'https://attendance-23d5a-default-rtdb.firebaseio.com'
+})
 
 app = Flask(__name__)
 CORS(app)
 
 # Configuration
-app.config['SECRET_KEY'] = 'your-secret-key'  # Change this in production
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///attendance.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY'] = 'jwt-secret-key'  # Change this in production
+app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', '763c43f173da75a364b2dd9fff673e6a4728acf77c6037304772a6bd37f30079')
+app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', '4ddccb335a80fe7b35896386708cb7c84bb6acab98c801ca645a8c3c939db44e')
 
-# Initialize extensions
-db = SQLAlchemy(app)
+# Initialize JWT
 jwt = JWTManager(app)
 
-# Models
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    password = db.Column(db.String(120), nullable=False)
-    role = db.Column(db.String(20), nullable=False)  # 'student' or 'teacher'
-    face_encoding = db.Column(db.PickleType, nullable=True)
+# Firebase references
+users_ref = db.reference('users')
+courses_ref = db.reference('courses')
+attendance_ref = db.reference('attendance')
 
-class Course(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    teacher_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+@app.route('/')
+def index():
+    return "Attendance System API"
 
-class Attendance(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    student_id = db.Column(db.Integer, db.ForeignKey('user.id'))
-    course_id = db.Column(db.Integer, db.ForeignKey('course.id'))
-    timestamp = db.Column(db.DateTime, nullable=False)
-    qr_code = db.Column(db.String(100), nullable=False)
-    location = db.Column(db.String(100), nullable=False)
-
-# QR Code generation
-def generate_qr_code(course_id, timestamp):
-    data = f"{course_id}:{timestamp}"
-    qr = qrcode.QRCode(version=1, box_size=10, border=5)
-    qr.add_data(data)
-    qr.make(fit=True)
-    return qr.make_image(fill_color="black", back_color="white")
-
-# Routes
-@app.route('/api/login', methods=['POST'])
+@app.route('/login', methods=['POST'])
 def login():
-    data = request.get_json()
-    user = User.query.filter_by(username=data['username']).first()
-    if user and bcrypt.checkpw(data['password'].encode('utf-8'), user.password):
-        access_token = create_access_token(identity=user.id)
-        return jsonify({'token': access_token, 'role': user.role}), 200
-    return jsonify({'message': 'Invalid credentials'}), 401
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
 
-@app.route('/api/generate-qr', methods=['POST'])
+    # Get user from Firebase
+    users_snapshot = users_ref.order_by_child('username').equal_to(username).get()
+    
+    if not users_snapshot:
+        return jsonify({"error": "User not found"}), 404
+    
+    user_id, user_data = list(users_snapshot.items())[0]
+    
+    if bcrypt.checkpw(password.encode('utf-8'), user_data['password'].encode('utf-8')):
+        access_token = create_access_token(identity=user_id)
+        return jsonify({
+            "token": access_token,
+            "role": user_data['role']
+        })
+    
+    return jsonify({"error": "Invalid credentials"}), 401
+
+@app.route('/generate-qr', methods=['POST'])
 def generate_qr():
-    data = request.get_json()
-    course_id = data['course_id']
-    qr_code = generate_qr_code(course_id, datetime.utcnow())
-    # Save QR code and return path
-    return jsonify({'qr_code': 'path_to_qr_code'})
-
-@app.route('/api/mark-attendance', methods=['POST'])
-def mark_attendance():
-    data = request.get_json()
+    data = request.json
+    course_id = data.get('course_id')
     
-    # Verify QR Code
-    qr_data = data['qr_code']
-    course_id, timestamp = qr_data.split(':')
-    qr_time = datetime.fromisoformat(timestamp)
-    if datetime.utcnow() - qr_time > timedelta(minutes=15):
-        return jsonify({'message': 'QR Code expired'}), 400
+    # Verify course exists in Firebase
+    course = courses_ref.child(course_id).get()
+    if not course:
+        return jsonify({"error": "Course not found"}), 404
 
-    # Verify Location
-    student_location = (data['latitude'], data['longitude'])
-    class_location = (data['class_latitude'], data['class_longitude'])
-    if geodesic(student_location, class_location).meters > 5:
-        return jsonify({'message': 'Not in class vicinity'}), 400
-
-    # Verify Face
-    student = User.query.get(data['student_id'])
-    face_image = face_recognition.load_image_file(data['face_image'])
-    face_encoding = face_recognition.face_encodings(face_image)[0]
-    if not face_recognition.compare_faces([student.face_encoding], face_encoding)[0]:
-        return jsonify({'message': 'Face verification failed'}), 400
-
-    # Mark attendance
-    attendance = Attendance(
-        student_id=data['student_id'],
-        course_id=course_id,
-        timestamp=datetime.utcnow(),
-        qr_code=data['qr_code'],
-        location=f"{student_location[0]},{student_location[1]}"
-    )
-    db.session.add(attendance)
-    db.session.commit()
-
-    return jsonify({'message': 'Attendance marked successfully'}), 200
-
-@app.route('/api/attendance-stats', methods=['GET'])
-def attendance_stats():
-    student_id = request.args.get('student_id')
-    course_id = request.args.get('course_id')
+    timestamp = datetime.now().isoformat()
+    qr_data = f"{course_id}:{timestamp}"
     
-    # Calculate attendance statistics
-    total_classes = Course.query.get(course_id).classes.count()
-    attended_classes = Attendance.query.filter_by(
-        student_id=student_id, 
-        course_id=course_id
-    ).count()
+    # Generate QR code
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(qr_data)
+    qr.make(fit=True)
+    qr_image = qr.make_image(fill_color="black", back_color="white")
     
-    percentage = (attended_classes / total_classes) * 100 if total_classes > 0 else 0
+    # Save QR code (you might want to save this to Firebase Storage instead)
+    qr_path = f"qrcodes/{course_id}_{timestamp}.png"
+    qr_image.save(qr_path)
     
     return jsonify({
-        'total_classes': total_classes,
-        'attended_classes': attended_classes,
-        'percentage': percentage
+        "qr_code": qr_data,
+        "timestamp": timestamp
+    })
+
+@app.route('/mark-attendance', methods=['POST'])
+def mark_attendance():
+    data = request.json
+    student_id = data.get('student_id')
+    qr_data = data.get('qr_code')
+    location = data.get('location')
+    # face_image = data.get('face_image')  # Base64 encoded image
+
+    # Verify QR code
+    try:
+        course_id, timestamp = qr_data.split(':')
+        qr_timestamp = datetime.fromisoformat(timestamp)
+        
+        # Check if QR code is expired (15 minutes)
+        if datetime.now() - qr_timestamp > timedelta(minutes=15):
+            return jsonify({"error": "QR code expired"}), 400
+    except:
+        return jsonify({"error": "Invalid QR code"}), 400
+
+    # Verify student is enrolled in course
+    course = courses_ref.child(course_id).get()
+    if not course or student_id not in course.get('students', []):
+        return jsonify({"error": "Student not enrolled in course"}), 403
+
+    # Get teacher's location from course data
+    teacher_location = course.get('location', '').split(',')
+    student_location = location.split(',')
+    
+    # Check if student is within 5 meters of teacher
+    if len(teacher_location) == 2 and len(student_location) == 2:
+        distance = geodesic(
+            (float(teacher_location[0]), float(teacher_location[1])),
+            (float(student_location[0]), float(student_location[1]))
+        ).meters
+        
+        if distance > 5:
+            return jsonify({"error": "You are too far from the class location"}), 400
+
+    # Record attendance in Firebase
+    new_attendance = {
+        'student_id': student_id,
+        'course_id': course_id,
+        'timestamp': datetime.now().isoformat(),
+        'location': location
+    }
+    
+    attendance_ref.push(new_attendance)
+    
+    return jsonify({"message": "Attendance marked successfully"})
+
+@app.route('/attendance-stats', methods=['GET'])
+def attendance_stats():
+    course_id = request.args.get('course_id')
+    
+    # Get course data
+    course = courses_ref.child(course_id).get()
+    if not course:
+        return jsonify({"error": "Course not found"}), 404
+
+    # Get attendance records for the course
+    attendance_records = attendance_ref.order_by_child('course_id').equal_to(course_id).get()
+    
+    if not attendance_records:
+        return jsonify({
+            "total_classes": 0,
+            "attendance_by_student": {},
+            "attendance_by_date": {}
+        })
+
+    # Process attendance records
+    attendance_by_student = {}
+    attendance_by_date = {}
+    
+    for record in attendance_records.values():
+        student_id = record['student_id']
+        date = datetime.fromisoformat(record['timestamp']).date().isoformat()
+        
+        # Count by student
+        if student_id not in attendance_by_student:
+            attendance_by_student[student_id] = 0
+        attendance_by_student[student_id] += 1
+        
+        # Count by date
+        if date not in attendance_by_date:
+            attendance_by_date[date] = 0
+        attendance_by_date[date] += 1
+
+    return jsonify({
+        "total_classes": len(attendance_by_date),
+        "attendance_by_student": attendance_by_student,
+        "attendance_by_date": attendance_by_date
     })
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
     app.run(debug=True)
